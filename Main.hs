@@ -110,10 +110,20 @@ readHex = sum . zipWith (*) [1,16..] . reverse . ys
 --hex = do { string "0x"; xs <- some (sat (`elem` (['0'..'9']++['a'..'f']) . toLower)); return (readHex xs)}
 --bin = do { string "0b"; nat }
 
-addr :: Parser Addr
-addr = (Addr . fromIntegral <$> do { char 'M'; space; char '['; space; n <- nat; space; char ']'; space; return n })
-       <|> Addr . fromIntegral <$> nat
+-- TODO: switch with addr, change addraddr to mememem
+--mem = Addr . fromIntegral <$> nat
        -- <|> Addr . fromIntegral <$> hex
+
+addr :: Parser Addr
+addr = do char 'M'
+          space
+          char '['
+          space
+          n <- nat
+          space
+          char ']'
+          space
+          return (Addr . fromIntegral $ n)
 
 addraddr :: Parser AddrAddr
 addraddr = AddrAddr . fromIntegral <$> nat
@@ -130,17 +140,18 @@ ioBus = do b <- upperLowerToken
 newline :: Parser Char
 newline = do { space; char '\n' }
 
+noop, add, sub, nott, andd, cmp, lb, lbi, sb, sbi, inn, ja, j, jeq, jne, ds :: Parser Opcode
 noop = return NOOP
 add  = do { r <- reg; space; char ','; space; ADD r <$> addr; }
 sub  = do { r <- reg; space; char ','; space; SUB r <$> addr; }
-nott  = NOT <$> reg
-andd  = do { r <- reg; space; char ','; space; AND r <$> addr; }
+nott = NOT <$> reg
+andd = do { r <- reg; space; char ','; space; AND r <$> addr; }
 cmp  = do { r <- reg; space; char ','; space; CMP r <$> addr; }
 lb   = do { r <- reg; space; char ','; space; LB r <$> addr; }
 lbi  = do { r <- reg; space; char ','; space; LBI r <$> addraddr; }
 sb   = do { a <- addr; space; char ','; space; SB a <$> reg; }
 sbi  = do { a <- addraddr; space; char ','; SBI a <$> reg; }
-inn   = do { a <- addr; space; char ','; IN a <$> ioBus; }
+inn  = do { a <- addr; space; char ','; IN a <$> ioBus; }
 ja   = JA <$> addr
 j    = J <$> offset
 jeq  = JEQ <$> offset
