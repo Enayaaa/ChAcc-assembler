@@ -1,0 +1,7 @@
+LB ACC, M[65]        // ACC = M[65]
+ADD ACC, M[64]       // ACC = ACC + M[64]
+DS                   // Display Reg <= ACC
+SB M[65], ACC        // DM[65] = acc
+SUB ACC, M[64]       // ACC = ACC - M[64]
+SB M[64], ACC        // DM[64] = ACC;
+JA 0x00              // JUMP to address 0x00
