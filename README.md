@@ -1,6 +1,6 @@
 # ChAcc Assembler
 I wanted to write assembly to test on our processor made in VHDL and needed an assembler.
-It was also an exercise to see how functional/combinatorial parsing worked in haskell (see Parser.hs)
+It was also an exercise to see how functional/combinatory parsing worked in haskell (see Parser.hs)
 
 ## Processor description
 The ChAcc processor, based on the lab processor of HY-120 course in the institute of Computer Science
