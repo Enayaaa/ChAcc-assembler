@@ -132,7 +132,7 @@ int = do char '-'
          return (-n)
        <|> nat
 
--- | Parse a string of spaces, tabs, and newlines
+-- | Parse a string of spaces, tabs
 space :: Parser String
 space = many (sat (\c -> c == '\t' || isSeparator c))
 

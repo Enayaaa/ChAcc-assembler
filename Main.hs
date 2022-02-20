@@ -1,7 +1,7 @@
+{-# LANGUAGE TypeApplications #-}
 module Main where
 
 import System.Environment
-import Debug.Trace
 import Parser
 import Control.Monad
 import Data.List
@@ -9,7 +9,9 @@ import System.Exit
 import Data.Char
 import Data.Word
 import Data.Maybe
+import Data.Functor
 
+help :: String
 help = "Usage:      ./Main [-h|--help] input_file\n\n"
     ++ "Syntax cheatsheat: First column shows valid assembly operations.\n"
     ++ "Addr ::= hex | bin | oct | naturalnumber\n"
@@ -50,43 +52,22 @@ instance Show AddrAddr where
 instance Show Offset where
     show (Offset x) = "+"++show x
 
-data Opcode = NOOP
-            | ADD Reg Addr
-            | SUB Reg Addr
-            | NOT Reg
-            | AND Reg Addr
-            | CMP Reg Addr
-            | LB Reg Addr
-            | LBI Reg AddrAddr
-            | SB Addr Reg
-            | SBI AddrAddr Reg
-            | IN Addr IOBus
-            | JA Addr
-            | J Offset
-            | JEQ Offset
-            | JNE Offset
-            | DS
+data Opcode = NOOP         | ADD Reg Addr     | SUB Reg Addr  | NOT Reg
+            | AND Reg Addr | CMP Reg Addr     | LB Reg Addr   | LBI Reg AddrAddr
+            | SB Addr Reg  | SBI AddrAddr Reg | IN Addr IOBus | JA Addr
+            | J Offset     | JEQ Offset       | JNE Offset    | DS
         deriving Show
 
- -- ordered after opcode in binary
+
+
+-- ############################# Parsing #############################
+
+opcodes :: [(String, Parser Opcode)]
 opcodes = [
-    "NOOP",
-    "ADD",
-    "SUB",
-    "NOT",
-    "AND",
-    "CMP",
-    "LB",
-    "LBI",
-    "SB",
-    "SBI",
-    "IN",
-    "JA",
-    "J",
-    "JEQ",
-    "JNE",
-    "DS"
-    ]
+    ("NOOP" , noop) , ("ADD" , add) , ("SUB" , sub) , ("NOT" , nott) ,
+    ("AND"  , andd) , ("CMP" , cmp) , ("LB"  , lb)  , ("LBI" , lbi)  ,
+    ("SB"   , sb)   , ("SBI" , sbi) , ("IN"  , inn) , ("JA"  , ja)   ,
+    ("J"    , j)    , ("JEQ" , jeq) , ("JNE" , jne) , ("DS"  , ds) ]
 
 upperLowerToken :: Parser String
 upperLowerToken = do xs <- some (alphanum <|> char '_')
@@ -97,24 +78,22 @@ upperLowerToken = do xs <- some (alphanum <|> char '_')
 
 opcode :: Parser String
 opcode = do xs <- upperLowerToken
-            guard (map toUpper xs `elem` opcodes)
+            guard (map toUpper xs `elem` map fst opcodes)
             return xs
 
 reg :: Parser Reg
 reg = do r <- upperLowerToken
-         if map toUpper r == "ACC"
-            then return ACC
-            else error "unknown reg"
+         guard (map toUpper r == "ACC")
+         return ACC
 
 -- | expects a base under 36?? and that the string only includes valid digits
 -- that are allowed in the base
 readBase :: Int -> String -> Int
 readBase base = sum . zipWith (\i d -> d*base^i) [0..] . reverse . ys
-    where
-        ys = map (\x -> if x `elem` ['0'..'9'] then
-                            ord x - ord '0'
-                        else
-                            ord (toLower x) - ord 'a' + 10)
+    where ys = map (\x ->
+                if x `elem` ['0'..'9'] then
+                    ord x - ord '0'
+                else ord (toLower x) - ord 'a' + 10)
 
 hex , bin, oct :: Parser Int
 hex = do string "0x"
@@ -129,63 +108,61 @@ oct = do string "0o"
 
 isWord8 :: Int -> Bool
 isWord8 n
-  | n > 0 = fromIntegral (minBound :: Word8) <= n
-            && n <= fromIntegral (maxBound :: Word8)
-  | otherwise = fromIntegral (minBound :: Word8) - 128 <= n
-                && n <= fromIntegral (maxBound :: Word8) - 128
+  | n > 0     = minB <= n && n <= maxB
+  | otherwise = minB - 128 <= n && n <= maxB - 128
+    where maxB = fromIntegral (maxBound @Word8)
+          minB = fromIntegral (minBound @Word8)
 
 addr :: Parser Addr
-addr = do string "M["
-          space
-          n <- bin <|> hex <|> oct <|> nat
-          guard (isWord8 n)
-          space
-          char ']'
-          space
-          return (Addr . fromIntegral $ n)
+addr = do
+    string "M[" <* space
+    n <- bin <|> hex <|> oct <|> nat
+    guard (isWord8 n) <* space
+    char ']' <* space
+    return (Addr . fromIntegral $ n)
 
 addraddr :: Parser AddrAddr
-addraddr = do string "M[M["
-              space
-              n <- hex <|> bin <|> oct <|> nat
-              guard (isWord8 n)
-              space
-              string "]]"
-              space
-              return (AddrAddr . fromIntegral $ n)
+addraddr = do
+    string "M[M[" <* space
+    n <- hex <|> bin <|> oct <|> nat
+    guard (isWord8 n) <* space
+    string "]]" <* space
+    return (AddrAddr . fromIntegral $ n)
 
 addrLiteral :: Parser Addr
-addrLiteral = Addr . fromIntegral <$> do {n <- hex <|> bin <|> oct <|> nat;
-                                         guard (isWord8 n);
-                                         return n}
+addrLiteral = Addr . fromIntegral <$> do
+    n <- hex <|> bin <|> oct <|> nat;
+    guard (isWord8 n);
+    return n
 
 offset :: Parser Offset
-offset = Offset . fromIntegral <$> do { n <- int;
-                                        guard (isWord8 n);
-                                        return n }
+offset = Offset . fromIntegral <$> do
+    n <- int;
+    guard (isWord8 n);
+    return n
 
 ioBus :: Parser IOBus
-ioBus = do b <- upperLowerToken
-           if map toUpper b == "IO_BUS"
-              then return IOBus
-              else error $ "unknown IO_Bus" ++ show b
+ioBus = do
+    b <- upperLowerToken
+    guard (map toUpper b == "IO_BUS")
+    return IOBus
 
 newline :: Parser Char
-newline = do { space; char '\n' }
-          <|> do { space; string "\r\n"; return '\n'}
+newline = (space *> char '\n')
+      <|> (space *> string "\r\n" $> '\n')
 
 noop, add, sub, nott, andd, cmp, lb, lbi, sb, sbi, inn, ja, j, jeq, jne, ds :: Parser Opcode
 noop = return NOOP
-add  = do { r <- reg      ; space ; char ',' ; space ; ADD r <$> addr     }
-sub  = do { r <- reg      ; space ; char ',' ; space ; SUB r <$> addr     }
+add  = ADD <$> (reg      <* space <* char ',' <* space) <*> addr
+sub  = SUB <$> (reg      <* space <* char ',' <* space) <*> addr
 nott = NOT <$> reg
-andd = do { r <- reg      ; space ; char ',' ; space ; AND r <$> addr     }
-cmp  = do { r <- reg      ; space ; char ',' ; space ; CMP r <$> addr     }
-lb   = do { r <- reg      ; space ; char ',' ; space ; LB r  <$> addr     }
-lbi  = do { r <- reg      ; space ; char ',' ; space ; LBI r <$> addraddr }
-sb   = do { a <- addr     ; space ; char ',' ; space ; SB a  <$> reg      }
-sbi  = do { a <- addraddr ; space ; char ',' ; space ; SBI a <$> reg      }
-inn  = do { a <- addr     ; space ; char ',' ; space ; IN a  <$> ioBus    }
+andd = AND <$> (reg      <* space <* char ',' <* space) <*> addr
+cmp  = CMP <$> (reg      <* space <* char ',' <* space) <*> addr
+lb   = LB  <$> (reg      <* space <* char ',' <* space) <*> addr
+lbi  = LBI <$> (reg      <* space <* char ',' <* space) <*> addraddr
+sb   = SB  <$> (addr     <* space <* char ',' <* space) <*> reg
+sbi  = SBI <$> (addraddr <* space <* char ',' <* space) <*> reg
+inn  = IN  <$> (addr     <* space <* char ',' <* space) <*> ioBus
 ja   = JA  <$> addrLiteral
 j    = J   <$> offset
 jeq  = JEQ <$> offset
@@ -198,33 +175,16 @@ lineComment = do space
                  xs <- many (sat (/= '\n'))
                  return (c++xs)
 
-lineWithComment :: Parser (Maybe Opcode)
-lineWithComment = do x <- line
-                     some newline <|> (do {lineComment; newline; return " "})
-                     return (Just x)
-                  <|> do {lineComment; newline; return Nothing}
-                  <|> do {space; newline; return Nothing}
+lineExpr :: Parser (Maybe Opcode)
+lineExpr = do x <- line
+              some newline <|> (do {lineComment; newline; return " "})
+              return (Just x)
+       <|> do {lineComment; newline; return Nothing}
+       <|> do {space; newline; return Nothing}
 
 line :: Parser Opcode
 line = do op <- opcode
-          case map toUpper op of
-            "NOOP" -> noop
-            "ADD"  -> add
-            "SUB"  -> sub
-            "NOT"  -> nott
-            "AND"  -> andd
-            "CMP"  -> cmp
-            "LB"   -> lb
-            "LBI"  -> lbi
-            "SB"   -> sb
-            "SBI"  -> sbi
-            "IN"   -> inn
-            "JA"   -> ja
-            "J"    -> j
-            "JEQ"  -> jeq
-            "JNE"  -> jne
-            "DS"   -> ds
-            op -> error $ "unknwn opcode  `"++ op ++ "`"
+          fromMaybe empty (lookup (map toUpper op) opcodes)
 
 toBin :: (Show a, Integral a) => Int -> a -> String
 toBin p 0 = replicate p '0'
@@ -233,6 +193,10 @@ toBin p n = let xs = concatMap show $ reverse (helper n)
     where
         helper 0 = []
         helper n = let (q,r) = n `divMod` 2 in r : helper q
+
+
+
+-- ###################################################################
 
 assemble :: [Opcode] -> String
 assemble = unlines . (\xs -> xs ++ replicate (256 - length xs) (zeros 12)) . map helper
@@ -263,7 +227,7 @@ main = do
     when (head args `elem` ["-h", "--help"]) (do {putStr help; exitSuccess})
 
     contents <- readFile (head args)
-    let [(res, unparsed)] = parse (many lineWithComment) contents
+    let [(res, unparsed)] = parse (many lineExpr) contents
         line = head (lines unparsed)
         lineNumber = (+1) . fromJust $ elemIndex line (lines contents)
     unless (null unparsed) (die $ "Invalid syntax at line "
