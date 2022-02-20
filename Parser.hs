@@ -126,6 +126,12 @@ nat :: Parser Int
 nat = do x <- some digitChar
          return (read x)
 
+int :: Parser Int
+int = do char '-'
+         n <- nat
+         return (-n)
+       <|> nat
+
 -- | Parse a string of spaces, tabs, and newlines
 space :: Parser String
 space = many (sat (\c -> c == '\t' || isSeparator c))
