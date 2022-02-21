@@ -10,6 +10,7 @@ import Data.Char
 import Data.Word
 import Data.Maybe
 import Data.Functor
+import Control.Monad.Trans.State.Lazy
 
 help :: String
 help = "Usage:      ./Main [-h|--help] input_file\n\n"
@@ -69,22 +70,25 @@ opcodes = [
     ("SB"   , sb)   , ("SBI" , sbi) , ("IN"  , inn) , ("JA"  , ja)   ,
     ("J"    , j)    , ("JEQ" , jeq) , ("JNE" , jne) , ("DS"  , ds) ]
 
-upperLowerToken :: Parser String
-upperLowerToken = do xs <- some (alphanum <|> char '_')
-                     let rs = filter isAlpha xs
-                     guard (all isUpper rs || all isLower rs)
-                     space
-                     return xs
+uLToken :: Parser String
+uLToken = do xs <- some (alphanum <|> char '_')
+             let rs = filter isAlpha xs
+             guard (all isUpper rs || all isLower rs)
+             space
+             return xs
 
-opcode :: Parser String
-opcode = do xs <- upperLowerToken
-            guard (map toUpper xs `elem` map fst opcodes)
-            return xs
+theULToken :: String -> Parser String
+theULToken s = do t <- uLToken
+                  guard (map toUpper t == map toUpper s)
+                  return t
+
+opcodeName :: Parser String
+opcodeName = do xs <- uLToken
+                guard (map toUpper xs `elem` map fst opcodes)
+                return xs
 
 reg :: Parser Reg
-reg = do r <- upperLowerToken
-         guard (map toUpper r == "ACC")
-         return ACC
+reg = theULToken "ACC" $> ACC
 
 -- | expects a base under 36?? and that the string only includes valid digits
 -- that are allowed in the base
@@ -142,10 +146,7 @@ offset = Offset . fromIntegral <$> do
     return n
 
 ioBus :: Parser IOBus
-ioBus = do
-    b <- upperLowerToken
-    guard (map toUpper b == "IO_BUS")
-    return IOBus
+ioBus = theULToken "IO_BUS" $> IOBus
 
 newline :: Parser Char
 newline = (space *> char '\n')
@@ -171,20 +172,18 @@ ds   = return DS
 
 lineComment :: Parser String
 lineComment = do space
-                 c <- string "//"
+                 c <- string "//" <|> string ";"
                  xs <- many (sat (/= '\n'))
                  return (c++xs)
 
-lineExpr :: Parser (Maybe Opcode)
-lineExpr = do x <- line
-              some newline <|> (do {lineComment; newline; return " "})
-              return (Just x)
-       <|> do {lineComment; newline; return Nothing}
-       <|> do {space; newline; return Nothing}
+lineExpr :: Parser Expr
+lineExpr = Op <$> (opcode <* (some newline <|> (lineComment *> newline $> " ")))
+       <|> lineComment *> newline *> lineExpr
+       <|> space *> newline *> lineExpr
+       <|> Org <$> (theULToken "ORG" *> space *> addrLiteral)
 
-line :: Parser Opcode
-line = do op <- opcode
-          fromMaybe empty (lookup (map toUpper op) opcodes)
+opcode :: Parser Opcode
+opcode = opcodeName >>= (\op -> fromMaybe empty (lookup (map toUpper op) opcodes))
 
 toBin :: (Show a, Integral a) => Int -> a -> String
 toBin p 0 = replicate p '0'
@@ -198,27 +197,50 @@ toBin p n = let xs = concatMap show $ reverse (helper n)
 
 -- ###################################################################
 
-assemble :: [Opcode] -> String
-assemble = unlines . (\xs -> xs ++ replicate (256 - length xs) (zeros 12)) . map helper
-    where
-        zeros n = replicate n '0'
-        helper x = case x of
-            NOOP                 -> "0000" ++ zeros 8
-            (ADD r (Addr a))     -> "0001" ++ toBin 8 a
-            (SUB r (Addr a))     -> "0010" ++ toBin 8 a
-            (NOT r)              -> "0011" ++ zeros 8
-            (AND r (Addr a))     -> "0100" ++ toBin 8 a
-            (CMP r (Addr a))     -> "0101" ++ toBin 8 a
-            (LB  r (Addr a))     -> "0110" ++ toBin 8 a
-            (LBI r (AddrAddr a)) -> "0111" ++ toBin 8 a
-            (SB  (Addr a) r)     -> "1000" ++ toBin 8 a
-            (SBI (AddrAddr a) r) -> "1001" ++ toBin 8 a
-            (IN  (Addr a) b)     -> "1010" ++ toBin 8 a
-            (JA  (Addr a))       -> "1011" ++ toBin 8 a
-            (J   (Offset o))     -> "1100" ++ toBin 8 o
-            (JEQ (Offset o))     -> "1101" ++ toBin 8 o
-            (JNE (Offset o))     -> "1110" ++ toBin 8 o
-            DS                   -> "1111" ++ zeros 8
+zeros :: Int -> String
+zeros n = replicate n '0'
+
+machineCode :: Opcode -> String
+machineCode NOOP                 = "0000" ++ zeros 8
+machineCode (ADD r (Addr a))     = "0001" ++ toBin 8 a
+machineCode (SUB r (Addr a))     = "0010" ++ toBin 8 a
+machineCode (NOT r)              = "0011" ++ zeros 8
+machineCode (AND r (Addr a))     = "0100" ++ toBin 8 a
+machineCode (CMP r (Addr a))     = "0101" ++ toBin 8 a
+machineCode (LB  r (Addr a))     = "0110" ++ toBin 8 a
+machineCode (LBI r (AddrAddr a)) = "0111" ++ toBin 8 a
+machineCode (SB  (Addr a) r)     = "1000" ++ toBin 8 a
+machineCode (SBI (AddrAddr a) r) = "1001" ++ toBin 8 a
+machineCode (IN  (Addr a) b)     = "1010" ++ toBin 8 a
+machineCode (JA  (Addr a))       = "1011" ++ toBin 8 a
+machineCode (J   (Offset o))     = "1100" ++ toBin 8 o
+machineCode (JEQ (Offset o))     = "1101" ++ toBin 8 o
+machineCode (JNE (Offset o))     = "1110" ++ toBin 8 o
+machineCode DS                   = "1111" ++ zeros 8
+
+data Expr = Op Opcode | Org Addr deriving (Show)
+
+data Value = Value String | Empty deriving (Show)
+
+type Result = [Value]
+
+eval :: Expr -> (Addr, Result) -> (Addr, Result)
+eval (Op code) (Addr adr, res) = (Addr (adr + 1), res ++ [Value $ machineCode code])
+eval (Org (Addr adr')) (Addr adr, res) = (Addr adr', res ++ replicate (fromIntegral adr' - length res) Empty)
+
+assemble' :: [Expr] -> Result
+assemble' = helper (Addr 0, [])
+  where
+    helper :: (Addr, Result) -> [Expr] -> Result
+    helper (adr, res) [] = res
+    helper (adr, res) (x : xs) = helper (adr', res') xs
+      where (adr', res') = eval x (adr, res)
+
+assemble :: Result -> String
+assemble = unlines . (\xs -> xs ++ replicate (256 - length xs) (zeros 12)) . map foo
+    where foo Empty     = zeros 12
+          foo (Value s) = s
+
 
 main :: IO ()
 main = do
@@ -227,15 +249,20 @@ main = do
     when (head args `elem` ["-h", "--help"]) (do {putStr help; exitSuccess})
 
     contents <- readFile (head args)
-    let [(res, unparsed)] = parse (many lineExpr) contents
-        line = head (lines unparsed)
-        lineNumber = (+1) . fromJust $ elemIndex line (lines contents)
+    let [(parsed, unparsed)] = parse (many lineExpr) contents
+        line                 = head (lines unparsed)
+        lineNumber           = (+1) . fromJust $ elemIndex line (lines contents)
     unless (null unparsed) (die $ "Invalid syntax at line "
                                  ++ show lineNumber ++": \n"
                                  ++ line ++ "\n\n"
                                  ++ "Use `-h` to see help page.")
 
-    let parsed = catMaybes res
-    writeFile "memory.mif" (assemble parsed)
+    let res = assemble' parsed
+        mem = length res
+    when (mem > 256) (die $ "Out of memory, the current program needs "
+                           ++ show mem
+                           ++ " memory cells, memory has 256 cells.")
+
+    writeFile "memory.mif" (assemble res)
     putStrLn "Wrote to memory.mif"
 

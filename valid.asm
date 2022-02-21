@@ -2,6 +2,7 @@
 // you can use this file when your design does not complete the testbench 
 // to check if every instruction is executed correctly
 
+org 0x10
 LB ACC, M[65]        // ACC = M[65]
 ADD ACC, M[64]       // ACC = ACC + M[64]
 DS                   // Display Reg <= ACC
