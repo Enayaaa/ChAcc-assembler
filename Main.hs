@@ -18,7 +18,8 @@ help = "Usage:      ./Main [-h|--help] input_file\n\n"
     ++ "Addr ::= hex | bin | oct | naturalnumber\n"
     ++ "Offset ::= int\n"
     ++ "literal prefixes:  bin = `0b`, hex = `0x`, oct = `0o`\n"
-    ++ "Use `//` for line comments.\n"
+    ++ "Use `//` or `;` for line comments.\n"
+    ++ "Use `org Addr` to start writing from a specific address memory.\n"
     ++ unlines (map ('\t':) [
     "NOOP                       No Operation        Do Nothing",
     "ADD ACC, M[Addr]           Add                 ACC = ACC + Memory[Addr]; Set C and Z flags",
