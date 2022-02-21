@@ -15,11 +15,13 @@ import Control.Monad.Trans.State.Lazy
 help :: String
 help = "Usage:      ./Main [-h|--help] input_file\n\n"
     ++ "Syntax cheatsheat: First column shows valid assembly operations.\n"
-    ++ "Addr ::= hex | bin | oct | naturalnumber\n"
-    ++ "Offset ::= hex | bin | oct | naturalnumber\n"
+    ++ "Byte ::= hex | bin | oct | naturalnumber\n"
+    ++ "Addr ::= Byte\n"
+    ++ "Offset ::= Byte\n"
     ++ "literal prefixes:  bin = `0b`, hex = `0x`, oct = `0o`\n"
     ++ "Use `//` or `;` for line comments.\n"
     ++ "Use `ORG Addr` to start writing from a specific address memory.\n"
+    ++ "Use `FCB Byte` to put a byte of data in the current memory cell.\n"
     ++ unlines (map ('\t':) [
     "NOOP                       No Operation        Do Nothing",
     "ADD ACC, M[Addr]           Add                 ACC = ACC + Memory[Addr]; Set C and Z flags",
