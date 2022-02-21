@@ -16,10 +16,10 @@ help :: String
 help = "Usage:      ./Main [-h|--help] input_file\n\n"
     ++ "Syntax cheatsheat: First column shows valid assembly operations.\n"
     ++ "Addr ::= hex | bin | oct | naturalnumber\n"
-    ++ "Offset ::= int\n"
+    ++ "Offset ::= hex | bin | oct | naturalnumber\n"
     ++ "literal prefixes:  bin = `0b`, hex = `0x`, oct = `0o`\n"
     ++ "Use `//` or `;` for line comments.\n"
-    ++ "Use `org Addr` to start writing from a specific address memory.\n"
+    ++ "Use `ORG Addr` to start writing from a specific address memory.\n"
     ++ unlines (map ('\t':) [
     "NOOP                       No Operation        Do Nothing",
     "ADD ACC, M[Addr]           Add                 ACC = ACC + Memory[Addr]; Set C and Z flags",
@@ -118,33 +118,23 @@ isWord8 n
     where maxB = fromIntegral (maxBound @Word8)
           minB = fromIntegral (minBound @Word8)
 
+byte :: Parser Word8
+byte = fromIntegral <$> do
+    n <- hex <|> bin <|> oct <|> nat
+    guard (isWord8 n)
+    return n
+
 addr :: Parser Addr
-addr = do
-    string "M[" <* space
-    n <- bin <|> hex <|> oct <|> nat
-    guard (isWord8 n) <* space
-    char ']' <* space
-    return (Addr . fromIntegral $ n)
+addr = Addr <$> (string "M[" *> space *> byte <* space <* char ']' <* space)
 
 addraddr :: Parser AddrAddr
-addraddr = do
-    string "M[M[" <* space
-    n <- hex <|> bin <|> oct <|> nat
-    guard (isWord8 n) <* space
-    string "]]" <* space
-    return (AddrAddr . fromIntegral $ n)
+addraddr = AddrAddr <$> (string "M[M[" *> space *> byte <* space <* string "]]" <* space)
 
 addrLiteral :: Parser Addr
-addrLiteral = Addr . fromIntegral <$> do
-    n <- hex <|> bin <|> oct <|> nat;
-    guard (isWord8 n);
-    return n
+addrLiteral = Addr <$> byte
 
 offset :: Parser Offset
-offset = Offset . fromIntegral <$> do
-    n <- int;
-    guard (isWord8 n);
-    return n
+offset = Offset <$> byte
 
 ioBus :: Parser IOBus
 ioBus = theULToken "IO_BUS" $> IOBus
@@ -180,8 +170,9 @@ lineComment = do space
 lineExpr :: Parser Expr
 lineExpr = Op <$> (opcode <* (some newline <|> (lineComment *> newline $> " ")))
        <|> lineComment *> newline *> lineExpr
-       <|> space *> newline *> lineExpr
+       <|> space *> some newline *> lineExpr
        <|> Org <$> (theULToken "ORG" *> space *> addrLiteral)
+       <|> Byte <$> (theULToken "FCB" *> space *> byte)
 
 opcode :: Parser Opcode
 opcode = opcodeName >>= (\op -> fromMaybe empty (lookup (map toUpper op) opcodes))
@@ -219,7 +210,7 @@ machineCode (JEQ (Offset o))     = "1101" ++ toBin 8 o
 machineCode (JNE (Offset o))     = "1110" ++ toBin 8 o
 machineCode DS                   = "1111" ++ zeros 8
 
-data Expr = Op Opcode | Org Addr deriving (Show)
+data Expr = Op Opcode | Org Addr | Byte Word8 deriving (Show)
 
 data Value = Value String | Empty deriving (Show)
 
@@ -228,6 +219,7 @@ type Result = [Value]
 eval :: Expr -> (Addr, Result) -> (Addr, Result)
 eval (Op code) (Addr adr, res) = (Addr (adr + 1), res ++ [Value $ machineCode code])
 eval (Org (Addr adr')) (Addr adr, res) = (Addr adr', res ++ replicate (fromIntegral adr' - length res) Empty)
+eval (Byte w) (Addr adr, res) = (Addr (adr+1), res ++ [Value $ toBin 12 w])
 
 assemble' :: [Expr] -> Result
 assemble' = helper (Addr 0, [])
@@ -252,9 +244,9 @@ main = do
     contents <- readFile (head args)
     let [(parsed, unparsed)] = parse (many lineExpr) contents
         line                 = head (lines unparsed)
-        lineNumber           = (+1) . fromJust $ elemIndex line (lines contents)
+        lineNumber           = (+1) <$> elemIndex line (lines contents)
     unless (null unparsed) (die $ "Invalid syntax at line "
-                                 ++ show lineNumber ++": \n"
+                                 ++ maybe "" show lineNumber++": \n"
                                  ++ line ++ "\n\n"
                                  ++ "Use `-h` to see help page.")
 
