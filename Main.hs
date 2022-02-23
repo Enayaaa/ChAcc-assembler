@@ -11,6 +11,7 @@ import Data.Word
 import Data.Maybe
 import Data.Functor
 import Control.Monad.Trans.State.Lazy
+import Data.Either
 
 help :: String
 help = "Usage:      ./Main [-h|--help] input_file\n\n"
@@ -157,16 +158,16 @@ lineComment = do space
                  return (c++xs)
 
 lineExpr :: Parser Expr
-lineExpr = Op <$> (opcode <* (some newline <|> (lineComment *> newline $> " ")))
+lineExpr = Op <$> (opcode <* many lineComment <* many newline)
        <|> lineComment *> newline *> lineExpr
        <|> space *> some newline *> lineExpr
-       <|> Org <$> (theULToken "ORG" *> addrLiteral)
-       <|> Byte <$> (theULToken "FCB" *> byte)
+       <|> Org <$> (theULToken "ORG" *> addrLiteral <* many newline)
+       <|> Byte <$> (theULToken "FCB" *> byte <* many newline)
 
 opcode :: Parser Opcode
 opcode = noop <|> add <|> sub <|> nott <|> andd <|> cmp <|> lb <|>
     lbi <|> sb <|> sbi <|> inn <|> ja <|> j <|> jeq <|> jne <|> ds
- 
+
 toBin :: (Show a, Integral a) => Int -> a -> String
 toBin p 0 = replicate p '0'
 toBin p n = let xs = concatMap show $ reverse (helper n)
@@ -205,18 +206,25 @@ data Expr = Op Opcode | Org Addr | Byte Word8 deriving (Show)
 data Value = Value String | Empty deriving (Show)
 
 type Result = [Value]
+type Error = String
 
-eval :: Expr -> Result -> Result
-eval (Op code) res         = res ++ [Value $ machineCode code]
-eval (Org (Addr adr')) res = res ++ replicate (fromIntegral adr' - length res) Empty
-eval (Byte w) res          = res ++ [Value $ toBin 12 w]
+eval :: Expr -> Result -> Either Error Result
+eval (Op code) res         = Right $ res ++ [Value $ machineCode code]
+eval (Org (Addr adr')) res = if fromIntegral adr' < currAdr
+    then Left $ "Cannot ORG to memory "++show adr'
+         ++". Either you have written other data in the memory cell, or your ORG is not in order.\n"
+         ++"Please place your ORG statements in order of lowest address to highest."
+    else Right $ res ++ replicate (fromIntegral adr' - length res) Empty
+    where currAdr = length res - 1
+eval (Byte w) res          = Right $ res ++ [Value $ toBin 12 w]
 
-assemble' :: [Expr] -> Result
+assemble' :: [Expr] -> Either Error Result
 assemble' = helper []
   where
-    helper :: Result -> [Expr] -> Result
-    helper res []       = res
-    helper res (x : xs) = helper res' xs
+    helper :: Result -> [Expr] -> Either Error Result
+    helper res []       = Right res
+    helper res (x : xs) = if isRight res' then helper (fromRight [] res') xs
+                                          else res'
       where res' = eval x res
 
 assemble :: Result -> String
@@ -245,7 +253,8 @@ main = do
     when (mem > 256) (die $ "Out of memory, the current program needs "
                            ++ show mem
                            ++ " memory cells, memory has 256 cells.")
+    when (isLeft res) (let Left err = res in die $ "ERROR: "++err)
 
-    writeFile "memory.mif" (assemble res)
+    writeFile "memory.mif" (assemble (fromRight [] res))
     putStrLn "Wrote to memory.mif"
 
