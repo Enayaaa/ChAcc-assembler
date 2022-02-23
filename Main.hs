@@ -206,18 +206,18 @@ data Value = Value String | Empty deriving (Show)
 
 type Result = [Value]
 
-eval :: Expr -> (Addr, Result) -> (Addr, Result)
-eval (Op code) (Addr adr, res) = (Addr (adr + 1), res ++ [Value $ machineCode code])
-eval (Org (Addr adr')) (Addr adr, res) = (Addr adr', res ++ replicate (fromIntegral adr' - length res) Empty)
-eval (Byte w) (Addr adr, res) = (Addr (adr+1), res ++ [Value $ toBin 12 w])
+eval :: Expr -> Result -> Result
+eval (Op code) res         = res ++ [Value $ machineCode code]
+eval (Org (Addr adr')) res = res ++ replicate (fromIntegral adr' - length res) Empty
+eval (Byte w) res          = res ++ [Value $ toBin 12 w]
 
 assemble' :: [Expr] -> Result
-assemble' = helper (Addr 0, [])
+assemble' = helper []
   where
-    helper :: (Addr, Result) -> [Expr] -> Result
-    helper (adr, res) [] = res
-    helper (adr, res) (x : xs) = helper (adr', res') xs
-      where (adr', res') = eval x (adr, res)
+    helper :: Result -> [Expr] -> Result
+    helper res []       = res
+    helper res (x : xs) = helper res' xs
+      where res' = eval x res
 
 assemble :: Result -> String
 assemble = unlines . (\xs -> xs ++ replicate (256 - length xs) (zeros 12)) . map foo
