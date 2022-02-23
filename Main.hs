@@ -66,13 +66,6 @@ data Opcode = NOOP         | ADD Reg Addr     | SUB Reg Addr  | NOT Reg
 
 -- ############################# Parsing #############################
 
-opcodes :: [(String, Parser Opcode)]
-opcodes = [
-    ("NOOP" , noop) , ("ADD" , add) , ("SUB" , sub) , ("NOT" , nott) ,
-    ("AND"  , andd) , ("CMP" , cmp) , ("LB"  , lb)  , ("LBI" , lbi)  ,
-    ("SB"   , sb)   , ("SBI" , sbi) , ("IN"  , inn) , ("JA"  , ja)   ,
-    ("J"    , j)    , ("JEQ" , jeq) , ("JNE" , jne) , ("DS"  , ds) ]
-
 uLToken :: Parser String
 uLToken = do xs <- token (some (alphanum <|> char '_'))
              let rs = filter isAlpha xs
@@ -83,11 +76,6 @@ theULToken :: String -> Parser String
 theULToken s = do t <- uLToken
                   guard (map toUpper t == map toUpper s)
                   return t
-
-opcodeName :: Parser String
-opcodeName = do xs <- uLToken
-                guard (map toUpper xs `elem` map fst opcodes)
-                return xs
 
 reg :: Parser Reg
 reg = theULToken "ACC" $> ACC
@@ -145,22 +133,22 @@ newline = (space *> char '\n')
       <|> (space *> string "\r\n" $> '\n')
 
 noop, add, sub, nott, andd, cmp, lb, lbi, sb, sbi, inn, ja, j, jeq, jne, ds :: Parser Opcode
-noop = return NOOP
-add  = ADD <$> (reg      <* symbol ",") <*> addr
-sub  = SUB <$> (reg      <* symbol ",") <*> addr
-nott = NOT <$> reg
-andd = AND <$> (reg      <* symbol ",") <*> addr
-cmp  = CMP <$> (reg      <* symbol ",") <*> addr
-lb   = LB  <$> (reg      <* symbol ",") <*> addr
-lbi  = LBI <$> (reg      <* symbol ",") <*> addraddr
-sb   = SB  <$> (addr     <* symbol ",") <*> reg
-sbi  = SBI <$> (addraddr <* symbol ",") <*> reg
-inn  = IN  <$> (addr     <* symbol ",") <*> ioBus
-ja   = JA  <$> addrLiteral
-j    = J   <$> offset
-jeq  = JEQ <$> offset
-jne  = JNE <$> offset
-ds   = return DS
+noop = theULToken "NOOP" $> NOOP
+add  = ADD <$> (theULToken "ADD" *> reg      <* symbol ",") <*> addr
+sub  = SUB <$> (theULToken "SUB" *> reg      <* symbol ",") <*> addr
+nott = NOT <$> (theULToken "NOT" *> reg)
+andd = AND <$> (theULToken "AND" *> reg      <* symbol ",") <*> addr
+cmp  = CMP <$> (theULToken "CMP" *> reg      <* symbol ",") <*> addr
+lb   = LB  <$> (theULToken "LB"  *> reg      <* symbol ",") <*> addr
+lbi  = LBI <$> (theULToken "LBI" *> reg      <* symbol ",") <*> addraddr
+sb   = SB  <$> (theULToken "SB"  *> addr     <* symbol ",") <*> reg
+sbi  = SBI <$> (theULToken "SBI" *> addraddr <* symbol ",") <*> reg
+inn  = IN  <$> (theULToken "IN"  *> addr     <* symbol ",") <*> ioBus
+ja   = JA  <$> (theULToken "JA"  *> addrLiteral)
+j    = J   <$> (theULToken "J"   *> offset)
+jeq  = JEQ <$> (theULToken "JEQ" *> offset)
+jne  = JNE <$> (theULToken "JNE" *> offset)
+ds   = theULToken "DS" $> DS
 
 lineComment :: Parser String
 lineComment = do space
@@ -176,8 +164,9 @@ lineExpr = Op <$> (opcode <* (some newline <|> (lineComment *> newline $> " ")))
        <|> Byte <$> (theULToken "FCB" *> byte)
 
 opcode :: Parser Opcode
-opcode = opcodeName >>= (\op -> fromMaybe empty (lookup (map toUpper op) opcodes))
-
+opcode = noop <|> add <|> sub <|> nott <|> andd <|> cmp <|> lb <|>
+    lbi <|> sb <|> sbi <|> inn <|> ja <|> j <|> jeq <|> jne <|> ds
+ 
 toBin :: (Show a, Integral a) => Int -> a -> String
 toBin p 0 = replicate p '0'
 toBin p n = let xs = concatMap show $ reverse (helper n)
