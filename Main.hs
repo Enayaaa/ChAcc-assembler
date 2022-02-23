@@ -74,10 +74,9 @@ opcodes = [
     ("J"    , j)    , ("JEQ" , jeq) , ("JNE" , jne) , ("DS"  , ds) ]
 
 uLToken :: Parser String
-uLToken = do xs <- some (alphanum <|> char '_')
+uLToken = do xs <- token (some (alphanum <|> char '_'))
              let rs = filter isAlpha xs
              guard (all isUpper rs || all isLower rs)
-             space
              return xs
 
 theULToken :: String -> Parser String
@@ -122,15 +121,15 @@ isWord8 n
 
 byte :: Parser Word8
 byte = fromIntegral <$> do
-    n <- hex <|> bin <|> oct <|> nat
+    n <- hex <|> bin <|> oct <|> nat <* space
     guard (isWord8 n)
     return n
 
 addr :: Parser Addr
-addr = Addr <$> (string "M[" *> space *> byte <* space <* char ']' <* space)
+addr = Addr <$> (symbol "M[" *> byte <* symbol "]")
 
 addraddr :: Parser AddrAddr
-addraddr = AddrAddr <$> (string "M[M[" *> space *> byte <* space <* string "]]" <* space)
+addraddr = AddrAddr <$> (symbol "M[M[" *> byte <* symbol "]]")
 
 addrLiteral :: Parser Addr
 addrLiteral = Addr <$> byte
@@ -147,16 +146,16 @@ newline = (space *> char '\n')
 
 noop, add, sub, nott, andd, cmp, lb, lbi, sb, sbi, inn, ja, j, jeq, jne, ds :: Parser Opcode
 noop = return NOOP
-add  = ADD <$> (reg      <* space <* char ',' <* space) <*> addr
-sub  = SUB <$> (reg      <* space <* char ',' <* space) <*> addr
+add  = ADD <$> (reg      <* symbol ",") <*> addr
+sub  = SUB <$> (reg      <* symbol ",") <*> addr
 nott = NOT <$> reg
-andd = AND <$> (reg      <* space <* char ',' <* space) <*> addr
-cmp  = CMP <$> (reg      <* space <* char ',' <* space) <*> addr
-lb   = LB  <$> (reg      <* space <* char ',' <* space) <*> addr
-lbi  = LBI <$> (reg      <* space <* char ',' <* space) <*> addraddr
-sb   = SB  <$> (addr     <* space <* char ',' <* space) <*> reg
-sbi  = SBI <$> (addraddr <* space <* char ',' <* space) <*> reg
-inn  = IN  <$> (addr     <* space <* char ',' <* space) <*> ioBus
+andd = AND <$> (reg      <* symbol ",") <*> addr
+cmp  = CMP <$> (reg      <* symbol ",") <*> addr
+lb   = LB  <$> (reg      <* symbol ",") <*> addr
+lbi  = LBI <$> (reg      <* symbol ",") <*> addraddr
+sb   = SB  <$> (addr     <* symbol ",") <*> reg
+sbi  = SBI <$> (addraddr <* symbol ",") <*> reg
+inn  = IN  <$> (addr     <* symbol ",") <*> ioBus
 ja   = JA  <$> addrLiteral
 j    = J   <$> offset
 jeq  = JEQ <$> offset
@@ -173,8 +172,8 @@ lineExpr :: Parser Expr
 lineExpr = Op <$> (opcode <* (some newline <|> (lineComment *> newline $> " ")))
        <|> lineComment *> newline *> lineExpr
        <|> space *> some newline *> lineExpr
-       <|> Org <$> (theULToken "ORG" *> space *> addrLiteral)
-       <|> Byte <$> (theULToken "FCB" *> space *> byte)
+       <|> Org <$> (theULToken "ORG" *> addrLiteral)
+       <|> Byte <$> (theULToken "FCB" *> byte)
 
 opcode :: Parser Opcode
 opcode = opcodeName >>= (\op -> fromMaybe empty (lookup (map toUpper op) opcodes))
