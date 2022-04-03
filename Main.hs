@@ -12,6 +12,8 @@ import Data.Maybe
 import Data.Functor
 import Control.Monad.Trans.State.Lazy
 import Data.Either
+import Data.List.Split (splitOn)
+
 
 help :: String
 help = "Usage:      ./Main [-h|--help] input_file\n\n"
@@ -20,7 +22,7 @@ help = "Usage:      ./Main [-h|--help] input_file\n\n"
     ++ "Addr ::= Byte\n"
     ++ "Offset ::= Byte\n"
     ++ "literal prefixes:  bin = `0b`, hex = `0x`, oct = `0o`\n"
-    ++ "Use `//` or `;` for line comments.\n"
+    ++ "Use `//` for line comments.\n"
     ++ "Use `ORG Addr` to start writing from a specific address memory.\n"
     ++ "Use `FCB Byte` to put a byte of data in the current memory cell.\n"
     ++ unlines (map ('\t':) [
@@ -151,18 +153,11 @@ jeq  = JEQ <$> (theULToken "JEQ" *> offset)
 jne  = JNE <$> (theULToken "JNE" *> offset)
 ds   = theULToken "DS" $> DS
 
-lineComment :: Parser String
-lineComment = do space
-                 c <- string "//" <|> string ";"
-                 xs <- many (sat (/= '\n'))
-                 return (c++xs)
-
 lineExpr :: Parser Expr
-lineExpr = Op <$> (opcode <* many lineComment <* many newline)
-       <|> lineComment *> newline *> lineExpr
-       <|> space *> some newline *> lineExpr
+lineExpr = Op <$> (opcode <* many newline)
        <|> Org <$> (theULToken "ORG" *> addrLiteral <* many newline)
        <|> Byte <$> (theULToken "FCB" *> byte <* many newline)
+       <|> some newline *> lineExpr
 
 opcode :: Parser Opcode
 opcode = noop <|> add <|> sub <|> nott <|> andd <|> cmp <|> lb <|>
@@ -232,6 +227,13 @@ assemble = unlines . (\xs -> xs ++ replicate (256 - length xs) (zeros 12)) . map
     where foo Empty     = zeros 12
           foo (Value s) = s
 
+stripComments :: String -> String
+stripComments = unlines
+              . map (head . splitOn "//")
+              . map (\l ->
+                  (\x -> if x == "//" then "" else l)
+                  $ take 2 l)
+              . lines
 
 main :: IO ()
 main = do
@@ -240,19 +242,23 @@ main = do
     when (head args `elem` ["-h", "--help"]) (do {putStr help; exitSuccess})
 
     contents <- readFile (head args)
-    let [(parsed, unparsed)] = parse (many lineExpr) contents
-        line                 = head (lines unparsed)
-        lineNumber           = (+1) <$> elemIndex line (lines contents)
-    unless (null unparsed) (die $ "Invalid syntax at line "
-                                 ++ maybe "" show lineNumber++": \n"
-                                 ++ line ++ "\n\n"
-                                 ++ "Use `-h` to see help page.")
+    let strippedContents = stripComments contents
+        [(parsed, unparsed)] = parse (many lineExpr) strippedContents
+        firstLineWithError   = head (lines unparsed)
+        lineNumber           = (+1) <$> elemIndex firstLineWithError (lines strippedContents)
+        line = lines contents !! (fromMaybe 1 lineNumber - 1)
+    unless (null unparsed)
+        (die $ "Invalid syntax at line "
+             ++ maybe "" show lineNumber++": \n"
+             ++ line ++ "\n\n"
+             ++ "Use `-h` to see help page.")
 
     let res = assemble' parsed
         mem = length res
-    when (mem > 256) (die $ "Out of memory, the current program needs "
-                           ++ show mem
-                           ++ " memory cells, memory has 256 cells.")
+    when (mem > 256)
+        (die $ "Out of memory, the current program needs "
+             ++ show mem
+             ++ " memory cells, memory has 256 cells.")
     when (isLeft res) (let Left err = res in die $ "ERROR: "++err)
 
     writeFile "memory.mif" (assemble (fromRight [] res))
